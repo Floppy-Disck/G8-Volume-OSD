@@ -21,9 +21,9 @@ public partial class App : Application
     private WindowsFlyoutTrigger? _flyout;
     private bool _systemEventsHooked;
 
-    // Experimental Windows-flyout mode: one trigger per knob turn ("burst").
-    private long _lastChangeMs = long.MinValue / 2;
-    private bool _burstUsesWindowsFlyout;
+    // Experimental Windows-flyout mode.
+    private long _lastFlyoutTriggerMs = long.MinValue / 2;
+    private bool _flyoutActive;
 
     internal bool UseWindowsFlyout => _settings.UseWindowsFlyout;
 
@@ -31,7 +31,7 @@ public partial class App : Application
     {
         _settings.UseWindowsFlyout = enabled;
         _settings.Save();
-        _burstUsesWindowsFlyout = false;
+        _flyoutActive = false;
         if (enabled)
         {
             _overlay?.HideNow();
@@ -68,7 +68,7 @@ public partial class App : Application
         {
             // Round down, never up, when the user only asked for a preview.
             _overlay.HideNow();
-            _flyout?.Show(turningUp: false);
+            TriggerWindowsFlyout(turningUp: false);
             return;
         }
 
@@ -132,10 +132,6 @@ public partial class App : Application
 
     private void OnVolumeChanged(VolumeState previous, VolumeState current)
     {
-        long now = Environment.TickCount64;
-        bool continuesBurst = now - _lastChangeMs < _settings.WindowsFlyoutQuietMs;
-        _lastChangeMs = now;
-
         if (!_settings.OverlayEnabled)
         {
             return;
@@ -145,21 +141,29 @@ public partial class App : Application
         // use the custom overlay, even in Windows-flyout mode.
         if (_settings.UseWindowsFlyout && !previous.Muted && !current.Muted)
         {
-            // The Windows flyout follows the volume live while it is open, so trigger it once
-            // at the start of a turn. The step-and-back it causes arrives inside the same burst
-            // and therefore cannot retrigger it.
-            if (!continuesBurst || !_burstUsesWindowsFlyout)
+            // The Windows flyout shows live values while open but closes ~2-3 s after it was
+            // opened. Open it at the start of a turn and re-open it while the turn continues.
+            // The step-and-back from our own trigger arrives within milliseconds, well inside
+            // the refresh interval, so it can never retrigger itself.
+            long sinceTrigger = Environment.TickCount64 - _lastFlyoutTriggerMs;
+            if (!_flyoutActive || sinceTrigger >= _settings.WindowsFlyoutRefreshMs)
             {
                 _overlay?.HideNow();
-                _flyout?.Show(turningUp: current.Percent >= previous.Percent);
+                TriggerWindowsFlyout(turningUp: current.Percent >= previous.Percent);
             }
 
-            _burstUsesWindowsFlyout = true;
             return;
         }
 
-        _burstUsesWindowsFlyout = false;
+        _flyoutActive = false;
         _overlay?.ShowVolume(current);
+    }
+
+    private void TriggerWindowsFlyout(bool turningUp)
+    {
+        _flyout?.Show(turningUp);
+        _lastFlyoutTriggerMs = Environment.TickCount64;
+        _flyoutActive = true;
     }
 
     // SystemEvents may raise on its own thread; always hop to the dispatcher.

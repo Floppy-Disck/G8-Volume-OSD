@@ -21,10 +21,11 @@ public sealed class AppSettings
     public bool UseWindowsFlyout { get; set; }
 
     /// <summary>
-    /// A volume change after this much quiet time counts as a new knob turn and opens the
-    /// Windows flyout again. Keep it at or below the flyout's own hide delay.
+    /// The Windows flyout closes about 2-3 s after it was opened, even while the volume keeps
+    /// changing. While changes keep arriving, the flyout is re-opened once this many ms have
+    /// passed since the last trigger. Keep it below the flyout's lifetime.
     /// </summary>
-    public int WindowsFlyoutQuietMs { get; set; } = 1500;
+    public int WindowsFlyoutRefreshMs { get; set; } = 1200;
 
     /// <summary>Core Audio endpoint ID. Null means "follow the Windows default playback device".</summary>
     public string? DeviceId { get; set; }

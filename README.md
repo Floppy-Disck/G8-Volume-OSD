@@ -66,28 +66,33 @@ The G8 knob sets the volume directly instead, so Windows never shows the popup f
 
 With **Use Windows volume popup (experimental)** checked, the app works like this:
 
-1. When a volume change arrives after at least `WindowsFlyoutQuietMs` (default 1500 ms)
-   without changes, that's the start of a knob turn.
-2. At that moment, and only then, the app sends `APPCOMMAND_VOLUME_DOWN` +
+1. On a volume change, if the app hasn't triggered the popup in the last
+   `WindowsFlyoutRefreshMs` (default 1200 ms), it sends `APPCOMMAND_VOLUME_DOWN` +
    `APPCOMMAND_VOLUME_UP` (or the reverse) to **its own hidden window**. Windows passes
    unhandled app commands to the shell, which steps the volume and opens its popup. Nothing is
    injected into the input stream, so the foreground game never receives a key, and no admin
    rights are needed.
-3. The Windows popup follows the volume live while the knob keeps turning, then closes on its
-   own timer. The step-and-back changes land inside the same turn, so they can't trigger
-   another popup and there's no feedback loop.
+2. The popup shows the live level while it's open, but it closes about 2–3 s after the
+   **shell's** last volume command. Changes from the knob update its number without keeping it
+   open. So during a long turn the app re-triggers about every 1.2 s, and only when a change
+   actually arrives. When you stop turning, the triggers stop and the popup closes normally.
+   No timers are involved.
+3. The step-and-back from a trigger arrives within milliseconds, well inside the refresh
+   interval, so it can't re-trigger itself and there's no feedback loop.
 
 Trade-offs (why it's opt-in):
 
 - **It writes the volume.** Each trigger moves the volume one step and straight back. Windows
   snaps to its 2% grid, so an odd level ends on a neighboring even level (for example 23% →
-  24%). The order is picked so the rounding goes the **same direction you're turning**.
+  24%). The order is picked so the rounding goes the **same direction you're turning**. A long
+  turn re-triggers about every 1.2 s, so it can snap up to once per refresh, always in your
+  turning direction.
 - **Mute uses the custom overlay.** Windows volume commands unmute, so mute changes, and any
   change while muted, show the custom overlay instead.
-- **Popup timing is a guess.** The app can't see whether the Windows popup is still open. If
-  you pause briefly and turn again, it may trigger while the popup is still visible (harmless,
-  just another 2% snap). If the popup closes sooner than the quiet gap and you resume inside
-  it, nothing shows until the next pause. Tune `WindowsFlyoutQuietMs` in `settings.json`.
+- **Popup timing is estimated.** The app can't see whether the Windows popup is open. It
+  assumes the popup lasts longer than `WindowsFlyoutRefreshMs`. If the popup still flickers
+  closed during long turns on your PC, lower the value in `settings.json` (for example to
+  1000). Raise it to snap less often.
 - Media keys and the taskbar slider show the Windows popup anyway, so in this mode they simply
   trigger it once more (no visible difference; those levels are already even).
 - **Preview overlay** in this mode opens the Windows popup and rounds down, never up.
@@ -155,7 +160,7 @@ machine). Use self-contained to copy the tool to a PC without it.
 
 | What | Where | When written |
 | --- | --- | --- |
-| Settings (`OverlayEnabled`, `UseWindowsFlyout`, `WindowsFlyoutQuietMs`, `DeviceId`, `DeviceName`) | `%LOCALAPPDATA%\G8VolumeOSD\settings.json` | Only when you change an option in the tray menu |
+| Settings (`OverlayEnabled`, `UseWindowsFlyout`, `WindowsFlyoutRefreshMs`, `DeviceId`, `DeviceName`) | `%LOCALAPPDATA%\G8VolumeOSD\settings.json` | Only when you change an option in the tray menu |
 | Errors | `%LOCALAPPDATA%\G8VolumeOSD\error.log` | Only on unexpected errors (never per volume event); capped at 256 KB |
 | Launch at login | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, value `G8 Volume OSD` | Only when you toggle the menu item |
 
@@ -250,8 +255,9 @@ restored):
 
 - [x] The built-in Windows 11 popup opened at the start of each turn and followed the level
       live (screenshots showed 27% and then 22%). The custom overlay stayed hidden.
-- [x] One trigger per turn, no feedback loop: the level stayed constant for 2.7 s of idle
-      readings after each turn.
+- [x] No feedback loop: the level stayed constant for 2 s or more of idle readings after each turn.
+- [x] Long turn (ten 1% steps 400 ms apart, 4 s in total): the popup was still visible at
+      3.9 s and 4.7 s and closed normally afterwards. Refresh triggers fired about every 1.3 s.
 - [x] Even levels return exactly (22% → 22%). An odd level such as 22.37% snaps to 22% or 24%.
 - [x] The app kept running and wrote no `error.log`.
 
@@ -290,8 +296,9 @@ briefly and restored it.
     default mode the app has no code path that sets volume or mute (see *Read-only by
     construction*).
 11. **Experimental Windows popup:** check *Use Windows volume popup (experimental)* and turn
-    the knob. The **Windows** popup opens once, follows the knob, and closes on its own, with no
-    custom overlay. Pause about 2 s and turn again: it opens again. Mute: the custom overlay
+    the knob. The **Windows** popup opens, follows the knob, **stays open through a long
+    turn**, and closes 2–3 s after you stop, with no custom overlay. Pause and turn again: it
+    opens again. Mute: the custom overlay
     shows instead, and you stay muted. In a game, the game shouldn't react to the popup (no
     keys are sent to it).
 
