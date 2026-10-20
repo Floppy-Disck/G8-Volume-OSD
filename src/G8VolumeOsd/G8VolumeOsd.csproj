@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <!-- Only for NotifyIcon (tray) and System.Drawing; ships with the Windows Desktop runtime. -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+
+    <AssemblyName>G8VolumeOSD</AssemblyName>
+    <RootNamespace>G8VolumeOsd</RootNamespace>
+    <Product>G8 Volume OSD</Product>
+    <Description>Volume overlay for hardware volume knobs (Sound Blaster G8).</Description>
+    <Version>0.1.0</Version>
+
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+
+    <!-- Publish defaults: one framework-dependent G8VolumeOSD.exe for win-x64.
+         Override with -p:SelfContained=true for a build that needs no installed runtime. -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <DebugType>embedded</DebugType>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!-- WFO0003 targets WinForms-hosted apps; this is a WPF app, which reads DPI awareness from the manifest. -->
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
+  </PropertyGroup>
+
+</Project>
