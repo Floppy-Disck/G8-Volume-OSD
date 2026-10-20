@@ -4,8 +4,13 @@ A small Windows 11 tray utility that shows a volume overlay when the volume of a
 device changes. It's built for the Creative Sound Blaster G8: turning the G8's knob updates the
 Windows volume, but Windows doesn't show its own volume popup for that change.
 
-The app **only observes**. It never changes volume, mute, default devices, audio routing,
-enhancements, drivers, services, or Creative settings. The Creative app can stay closed.
+In its default mode the app **only observes**. It never changes volume, mute, default
+devices, audio routing, enhancements, drivers, services, or Creative settings. The Creative
+app can stay closed.
+
+There's also an opt-in **experimental mode** that opens the built-in Windows 11 volume popup
+instead of the custom overlay. It has to nudge the volume one step and back to do that (see
+[Experimental: Windows volume popup](#experimental-windows-volume-popup)).
 
 ## Features
 
@@ -24,7 +29,8 @@ enhancements, drivers, services, or Creative settings. The Creative app can stay
 - Non-activating and click-through (`WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW`,
   `MA_NOACTIVATE`). It never takes keyboard focus and never intercepts the mouse.
 - Tray menu:
-  - **Show volume overlay**: enable or disable the overlay
+  - **Show volume overlay**: enable or disable the overlay (in both modes)
+  - **Use Windows volume popup (experimental)**: off by default; see below
   - **Playback device**: *Default playback device (follow Windows)*, or a specific endpoint
     (saved by endpoint ID)
   - **Preview overlay** (or left-click the tray icon)
@@ -51,6 +57,40 @@ changes.
 
 When you use media keys or the taskbar slider, Windows shows its own flyout **and** this
 overlay. Turn the overlay off from the tray if that bothers you.
+
+### Experimental: Windows volume popup
+
+Windows has **no API** to show its own volume popup. It appears only when the shell itself
+handles a volume command (a media key, or a USB device that reports itself as a volume key).
+The G8 knob sets the volume directly instead, so Windows never shows the popup for it.
+
+With **Use Windows volume popup (experimental)** checked, the app works like this:
+
+1. When a volume change arrives after at least `WindowsFlyoutQuietMs` (default 1500 ms)
+   without changes, that's the start of a knob turn.
+2. At that moment, and only then, the app sends `APPCOMMAND_VOLUME_DOWN` +
+   `APPCOMMAND_VOLUME_UP` (or the reverse) to **its own hidden window**. Windows passes
+   unhandled app commands to the shell, which steps the volume and opens its popup. Nothing is
+   injected into the input stream, so the foreground game never receives a key, and no admin
+   rights are needed.
+3. The Windows popup follows the volume live while the knob keeps turning, then closes on its
+   own timer. The step-and-back changes land inside the same turn, so they can't trigger
+   another popup and there's no feedback loop.
+
+Trade-offs (why it's opt-in):
+
+- **It writes the volume.** Each trigger moves the volume one step and straight back. Windows
+  snaps to its 2% grid, so an odd level ends on a neighboring even level (for example 23% →
+  24%). The order is picked so the rounding goes the **same direction you're turning**.
+- **Mute uses the custom overlay.** Windows volume commands unmute, so mute changes, and any
+  change while muted, show the custom overlay instead.
+- **Popup timing is a guess.** The app can't see whether the Windows popup is still open. If
+  you pause briefly and turn again, it may trigger while the popup is still visible (harmless,
+  just another 2% snap). If the popup closes sooner than the quiet gap and you resume inside
+  it, nothing shows until the next pause. Tune `WindowsFlyoutQuietMs` in `settings.json`.
+- Media keys and the taskbar slider show the Windows popup anyway, so in this mode they simply
+  trigger it once more (no visible difference; those levels are already even).
+- **Preview overlay** in this mode opens the Windows popup and rounds down, never up.
 
 ### Games and fullscreen
 
@@ -115,7 +155,7 @@ machine). Use self-contained to copy the tool to a PC without it.
 
 | What | Where | When written |
 | --- | --- | --- |
-| Settings (`OverlayEnabled`, `DeviceId`, `DeviceName`) | `%LOCALAPPDATA%\G8VolumeOSD\settings.json` | Only when you change an option in the tray menu |
+| Settings (`OverlayEnabled`, `UseWindowsFlyout`, `WindowsFlyoutQuietMs`, `DeviceId`, `DeviceName`) | `%LOCALAPPDATA%\G8VolumeOSD\settings.json` | Only when you change an option in the tray menu |
 | Errors | `%LOCALAPPDATA%\G8VolumeOSD\error.log` | Only on unexpected errors (never per volume event); capped at 256 KB |
 | Launch at login | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, value `G8 Volume OSD` | Only when you toggle the menu item |
 
@@ -137,6 +177,7 @@ src/G8VolumeOsd/
   OverlayWindow.xaml(.cs)  the reused overlay window
   ThemeColors.cs           light/dark + accent colors
   TrayIcon.cs              NotifyIcon + menu (built on open)
+  WindowsFlyoutTrigger.cs  experimental: opens the built-in Windows volume popup
   AppSettings.cs, StartupRegistration.cs, ErrorLog.cs
 ```
 
@@ -148,7 +189,9 @@ src/G8VolumeOsd/
 - **Read-only by construction.** In `Interop/CoreAudio.cs`, every vtable slot that could write
   audio state (`SetMasterVolumeLevel*`, `SetChannelVolumeLevel*`, `SetMute`) is declared as a
   parameterless `VtblGap_*` placeholder, and `IPropertyStore.SetValue/Commit` aren't declared.
-  The app can't change audio settings even by accident.
+  The app can't change audio settings through Core Audio, even by accident. The **only** code
+  path that affects volume is the opt-in `WindowsFlyoutTrigger`, which asks the shell for one
+  volume step down and one up (see *Experimental: Windows volume popup*).
 - **Threading.** All COM calls run on the UI thread. Audio callbacks run on system worker
   threads and do three things: read two fields from the notification struct, write a packed
   64-bit value into a mailbox with `Interlocked.Exchange`, and post **at most one** dispatcher
@@ -201,8 +244,22 @@ effect on games.
 - [x] Static check: the interop layer has no callable volume or mute setters (see *Read-only by
       construction*)
 
-Not automated: overlay appearance, tray menu interaction, and anything that needs the volume to
-change. The automated tests deliberately didn't change your volume.
+Experimental Windows-popup mode (run on the development machine, with the volume nudged by a
+test-only knob simulator in five 1% steps up, a 3 s pause, then five 1% steps down, and then
+restored):
+
+- [x] The built-in Windows 11 popup opened at the start of each turn and followed the level
+      live (screenshots showed 27% and then 22%). The custom overlay stayed hidden.
+- [x] One trigger per turn, no feedback loop: the level stayed constant for 2.7 s of idle
+      readings after each turn.
+- [x] Even levels return exactly (22% → 22%). An odd level such as 22.37% snaps to 22% or 24%.
+- [x] The app kept running and wrote no `error.log`.
+
+Not automated: overlay appearance in default mode, tray menu interaction, and real G8 knob
+input.
+
+The default-mode checks didn't change your volume. The experimental-mode test changed it
+briefly and restored it.
 
 ### Manual hardware checklist (please run)
 
@@ -229,8 +286,14 @@ change. The automated tests deliberately didn't change your volume.
    `G8VolumeOSD.exe` CPU time, leave it idle 5 minutes, and confirm it barely moves. Then turn
    the knob for 30 s and compare.
 10. **Never writes audio settings:** note the volume and mute of each device, run the app
-    through the steps above, and confirm nothing changed except what you changed yourself. The
-    app has no code path that sets volume or mute (see *Read-only by construction*).
+    through the steps above, and confirm nothing changed except what you changed yourself. In
+    default mode the app has no code path that sets volume or mute (see *Read-only by
+    construction*).
+11. **Experimental Windows popup:** check *Use Windows volume popup (experimental)* and turn
+    the knob. The **Windows** popup opens once, follows the knob, and closes on its own, with no
+    custom overlay. Pause about 2 s and turn again: it opens again. Mute: the custom overlay
+    shows instead, and you stay muted. In a game, the game shouldn't react to the popup (no
+    keys are sent to it).
 
 ## License
 

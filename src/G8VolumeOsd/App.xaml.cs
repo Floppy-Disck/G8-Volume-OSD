@@ -18,7 +18,25 @@ public partial class App : Application
     private OverlayWindow? _overlay;
     private VolumeMonitor? _monitor;
     private TrayIcon? _tray;
+    private WindowsFlyoutTrigger? _flyout;
     private bool _systemEventsHooked;
+
+    // Experimental Windows-flyout mode: one trigger per knob turn ("burst").
+    private long _lastChangeMs = long.MinValue / 2;
+    private bool _burstUsesWindowsFlyout;
+
+    internal bool UseWindowsFlyout => _settings.UseWindowsFlyout;
+
+    internal void SetUseWindowsFlyout(bool enabled)
+    {
+        _settings.UseWindowsFlyout = enabled;
+        _settings.Save();
+        _burstUsesWindowsFlyout = false;
+        if (enabled)
+        {
+            _overlay?.HideNow();
+        }
+    }
 
     internal void SetOverlayEnabled(bool enabled)
     {
@@ -45,8 +63,17 @@ public partial class App : Application
             return;
         }
 
+        bool attached = _monitor.TryGetCurrentState(out VolumeState state);
+        if (attached && _settings.UseWindowsFlyout && !state.Muted)
+        {
+            // Round down, never up, when the user only asked for a preview.
+            _overlay.HideNow();
+            _flyout?.Show(turningUp: false);
+            return;
+        }
+
         // Shows the current level if a device is attached; otherwise a sample value.
-        _overlay.ShowVolume(_monitor.TryGetCurrentState(out VolumeState state) ? state : new VolumeState(50, false));
+        _overlay.ShowVolume(attached ? state : new VolumeState(50, false));
     }
 
     protected override void OnStartup(StartupEventArgs e)
@@ -68,6 +95,7 @@ public partial class App : Application
 
         _settings = AppSettings.Load();
         _overlay = new OverlayWindow();
+        _flyout = new WindowsFlyoutTrigger();
         _monitor = new VolumeMonitor(Dispatcher);
         _tray = new TrayIcon(this, _settings, _monitor);
 
@@ -90,6 +118,7 @@ public partial class App : Application
 
         _monitor?.Dispose();
         _tray?.Dispose();
+        _flyout?.Dispose();
         _overlay?.Close();
 
         if (_instanceMutex != null)
@@ -101,12 +130,36 @@ public partial class App : Application
         base.OnExit(e);
     }
 
-    private void OnVolumeChanged(VolumeState state)
+    private void OnVolumeChanged(VolumeState previous, VolumeState current)
     {
-        if (_settings.OverlayEnabled)
+        long now = Environment.TickCount64;
+        bool continuesBurst = now - _lastChangeMs < _settings.WindowsFlyoutQuietMs;
+        _lastChangeMs = now;
+
+        if (!_settings.OverlayEnabled)
         {
-            _overlay?.ShowVolume(state);
+            return;
         }
+
+        // Volume keys unmute in Windows, so mute changes (and anything while muted) always
+        // use the custom overlay, even in Windows-flyout mode.
+        if (_settings.UseWindowsFlyout && !previous.Muted && !current.Muted)
+        {
+            // The Windows flyout follows the volume live while it is open, so trigger it once
+            // at the start of a turn. The step-and-back it causes arrives inside the same burst
+            // and therefore cannot retrigger it.
+            if (!continuesBurst || !_burstUsesWindowsFlyout)
+            {
+                _overlay?.HideNow();
+                _flyout?.Show(turningUp: current.Percent >= previous.Percent);
+            }
+
+            _burstUsesWindowsFlyout = true;
+            return;
+        }
+
+        _burstUsesWindowsFlyout = false;
+        _overlay?.ShowVolume(current);
     }
 
     // SystemEvents may raise on its own thread; always hop to the dispatcher.

@@ -116,6 +116,16 @@ internal sealed class TrayIcon : IDisposable
         overlay.Click += (_, _) => _app.SetOverlayEnabled(!_settings.OverlayEnabled);
         _menu.Items.Add(overlay);
 
+        var windowsFlyout = new ToolStripMenuItem("Use Windows volume popup (experimental)")
+        {
+            Checked = _app.UseWindowsFlyout,
+            Enabled = _settings.OverlayEnabled,
+            ToolTipText = "Opens the built-in Windows 11 volume popup when the knob starts turning. " +
+                          "Briefly steps the volume down and up (snaps to the 2% grid). Mute still uses the custom overlay.",
+        };
+        windowsFlyout.Click += (_, _) => _app.SetUseWindowsFlyout(!_app.UseWindowsFlyout);
+        _menu.Items.Add(windowsFlyout);
+
         _menu.Items.Add(BuildDeviceMenu());
 
         var preview = new ToolStripMenuItem("Preview overlay");

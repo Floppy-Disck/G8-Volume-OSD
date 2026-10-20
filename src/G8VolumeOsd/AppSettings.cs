@@ -14,6 +14,18 @@ public sealed class AppSettings
 
     public bool OverlayEnabled { get; set; } = true;
 
+    /// <summary>
+    /// Experimental: show the built-in Windows volume flyout instead of the custom overlay.
+    /// Unlike the default mode, this nudges the volume one step and back to open the flyout.
+    /// </summary>
+    public bool UseWindowsFlyout { get; set; }
+
+    /// <summary>
+    /// A volume change after this much quiet time counts as a new knob turn and opens the
+    /// Windows flyout again. Keep it at or below the flyout's own hide delay.
+    /// </summary>
+    public int WindowsFlyoutQuietMs { get; set; } = 1500;
+
     /// <summary>Core Audio endpoint ID. Null means "follow the Windows default playback device".</summary>
     public string? DeviceId { get; set; }
 

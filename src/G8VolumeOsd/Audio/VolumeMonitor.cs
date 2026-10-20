@@ -69,8 +69,8 @@ internal sealed class VolumeMonitor : IDisposable
         };
     }
 
-    /// <summary>Raised on the UI thread when the observed volume or mute state changes.</summary>
-    public event Action<VolumeState>? VolumeChanged;
+    /// <summary>Raised on the UI thread when the observed volume or mute state changes: (previous, current).</summary>
+    public event Action<VolumeState, VolumeState>? VolumeChanged;
 
     /// <summary>Raised on the UI thread when the attached device (or lack of one) may have changed.</summary>
     public event Action? StatusChanged;
@@ -449,13 +449,14 @@ internal sealed class VolumeMonitor : IDisposable
             return;
         }
 
+        VolumeState previous = _lastState;
         _lastState = state;
         if (Environment.TickCount64 - _attachedAtMs < AttachGraceMs)
         {
             return;
         }
 
-        VolumeChanged?.Invoke(state);
+        VolumeChanged?.Invoke(previous, state);
     }
 
     private void ProcessDeviceChange()
