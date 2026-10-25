@@ -304,4 +304,4 @@ briefly and restored it.
 
 ## License
 
-No license chosen yet. All rights reserved by the author until one is added.
+[MIT](LICENSE). Not affiliated with Creative Technology; "Sound Blaster" is their trademark.
